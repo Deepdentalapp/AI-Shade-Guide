@@ -1,21 +1,22 @@
 import streamlit as st
 import numpy as np
-from PIL import Image
 import cv2
-from streamlit_drawable_canvas import st_canvas
-from fpdf import FPDF
+from PIL import Image
+from datetime import datetime
+import base64
 import os
-import datetime
+from fpdf import FPDF
 
-st.set_page_config(page_title="Tooth Shade Matcher - AffoDent", layout="wide")
-st.title("🦷 AffoDent Tooth Shade Matcher")
-st.markdown("Upload a **clear photo of the tooth**, tap to sample color, and compare across multiple shade systems.")
+# App config
+st.set_page_config(page_title="AffoDent Tooth Shade Matcher", layout="centered")
+st.title("🦷 AffoDent Professional Dental Clinic")
+st.subheader("Tooth Shade Detection & PDF Report")
 
-# Directory to store patient reports
-os.makedirs("patient_reports", exist_ok=True)
+# Directories
+os.makedirs("records", exist_ok=True)
 
-# Shade systems dictionary
-shade_systems = {
+# Define shade systems
+shade_guides = {
     "Vita Classical": {
         "A1": (255, 240, 220),
         "A2": (240, 224, 200),
@@ -28,130 +29,132 @@ shade_systems = {
         "D2": (200, 180, 160),
     },
     "Vita 3D Master": {
-        "1M1": (252, 239, 224),
-        "2M1": (245, 225, 210),
-        "2M2": (230, 210, 190),
-        "3M2": (215, 190, 170),
-        "4M1": (200, 175, 155),
+        "1M1": (250, 240, 230),
+        "2M2": (235, 220, 200),
+        "3M3": (220, 200, 180),
+        "4M2": (205, 185, 165),
+        "5M3": (190, 170, 150),
     },
     "Ivoclar Chromascop": {
         "100": (255, 245, 230),
-        "110": (245, 235, 220),
-        "130": (235, 215, 200),
-        "210": (225, 200, 180),
-        "220": (215, 190, 170),
-        "230": (205, 180, 160),
-        "240": (195, 170, 150),
-        "250": (185, 160, 140),
-        "260": (175, 150, 130),
-        "430": (160, 140, 120),
+        "200": (240, 225, 210),
+        "300": (225, 205, 185),
+        "400": (210, 190, 170),
+        "500": (195, 175, 155),
     }
 }
 
-# Convert RGB to Lab
+# RGB → LAB converter
 def rgb_to_lab(rgb):
-    rgb_arr = np.uint8([[list(rgb)]])
-    lab = cv2.cvtColor(rgb_arr, cv2.COLOR_RGB2LAB)
-    return lab[0][0]
+    arr = np.uint8([[list(rgb)]])
+    return cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0][0]
 
-# Compare RGB to closest shade in each system
-def get_closest_shades(input_rgb):
-    input_lab = rgb_to_lab(input_rgb)
-    closest_shades = {}
-    for system, shades in shade_systems.items():
+# Closest shade for all systems
+def get_closest_shades(rgb_input):
+    input_lab = rgb_to_lab(rgb_input)
+    result = {}
+    for system, shades in shade_guides.items():
+        closest = None
         min_dist = float("inf")
-        best_match = None
-        for shade, rgb in shades.items():
-            dist = np.linalg.norm(input_lab - rgb_to_lab(rgb))
+        for name, ref_rgb in shades.items():
+            ref_lab = rgb_to_lab(ref_rgb)
+            dist = np.linalg.norm(input_lab - ref_lab)
             if dist < min_dist:
                 min_dist = dist
-                best_match = shade
-        closest_shades[system] = best_match
-    return closest_shades
+                closest = name
+        result[system] = closest
+    return result
 
-# Save report as PDF
-def generate_pdf(name, age, sex, selected_rgb, closest_shades, manual_override, filename):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt="AffoDent Professional Dental Clinic", ln=True, align='C')
-    pdf.cell(200, 10, txt="Tooth Shade Matching Report", ln=True, align='C')
-    pdf.ln(10)
-    pdf.cell(200, 10, txt=f"Name: {name}    Age: {age}    Sex: {sex}", ln=True)
-    pdf.cell(200, 10, txt=f"Selected RGB: {selected_rgb}", ln=True)
-
-    pdf.ln(5)
-    for system, shade in closest_shades.items():
-        pdf.cell(200, 10, txt=f"{system} Match: {shade}", ln=True)
-
-    if manual_override:
-        pdf.ln(5)
-        pdf.cell(200, 10, txt=f"Manual Override: {manual_override}", ln=True)
-
-    pdf.output(filename)
-
-# Load history
-def load_history():
-    files = sorted(os.listdir("patient_reports"), reverse=True)[:10]
-    return [f.replace(".pdf", "") for f in files]
-
-# Sidebar
-with st.sidebar:
-    st.header("Patient Info")
-    name = st.text_input("Name")
-    age = st.text_input("Age")
+# Patient info
+with st.form("shade_form"):
+    name = st.text_input("Patient Name")
+    age = st.number_input("Age", min_value=0, max_value=120, step=1)
     sex = st.selectbox("Sex", ["Male", "Female", "Other"])
-    manual_override = st.selectbox("Manual Shade Override (Optional)", ["None"] + 
-        [f"{sys} - {shade}" for sys, shades in shade_systems.items() for shade in shades])
-    st.markdown("---")
-    st.subheader("📁 Past Reports")
-    search_term = st.text_input("🔍 Search by name")
-    history = load_history()
-    for record in history:
-        if search_term.lower() in record.lower():
-            st.markdown(f"[📝 {record}](patient_reports/{record}.pdf)")
+    uploaded_image = st.file_uploader("Upload Tooth Image", type=["jpg", "jpeg", "png"])
+    manual_override = st.checkbox("Enter manual shade?")
+    selected_manual = None
+    if manual_override:
+        selected_manual = st.text_input("Manual shade entry (e.g. A2, 3M2, 300)")
+    submitted = st.form_submit_button("Generate Report")
 
-uploaded_image = st.file_uploader("📤 Upload Tooth Image", type=["jpg", "jpeg", "png"])
-
-if uploaded_image:
+if submitted and uploaded_image:
     image = Image.open(uploaded_image).convert("RGB")
     img_array = np.array(image)
 
-    st.markdown("### ✏️ Click on the tooth area to sample color")
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 255, 255, 0)",
-        stroke_width=1,
-        background_image=image,
-        update_streamlit=True,
-        height=image.height,
-        width=image.width,
-        drawing_mode="point",
-        point_display_radius=5,
-        key="canvas"
-    )
+    # Average RGB
+    avg_rgb = tuple(np.mean(img_array.reshape(-1, 3), axis=0).astype(int))
 
-    if canvas_result.json_data and canvas_result.json_data["objects"]:
-        last_point = canvas_result.json_data["objects"][-1]
-        x = int(last_point["left"])
-        y = int(last_point["top"])
+    # Get closest matches
+    shade_result = get_closest_shades(avg_rgb)
 
-        if 0 <= x < img_array.shape[1] and 0 <= y < img_array.shape[0]:
-            selected_rgb = tuple(int(c) for c in img_array[y, x])
-            st.markdown(f"🎯 **Selected RGB:** {selected_rgb}")
-            st.color_picker("Color Preview", "#%02x%02x%02x" % selected_rgb, label_visibility="collapsed")
+    # Prepare report
+    st.success("✅ Report generated!")
+    st.image(image, caption="Uploaded Tooth Image", use_column_width=True)
+    st.markdown(f"**Average RGB**: {avg_rgb}")
+    st.markdown("### Shade Match Results:")
+    for system, shade in shade_result.items():
+        st.markdown(f"🟢 {system}: **{shade}**")
 
-            closest_shades = get_closest_shades(selected_rgb)
-            st.markdown("### 🔎 Closest Matches:")
-            for system, shade in closest_shades.items():
-                st.success(f"✅ {system}: **{shade}**")
+    if selected_manual:
+        st.markdown(f"✍️ Manual Shade: **{selected_manual}**")
 
-            if st.button("📄 Generate Report"):
-                filename = f"patient_reports/{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-                generate_pdf(name, age, sex, selected_rgb, closest_shades,
-                             None if manual_override == "None" else manual_override, filename)
-                st.success(f"✅ Report saved as: {filename}")
-                st.markdown(f"[📥 Download Report]({filename})")
-    else:
-        st.info("Click anywhere on the image to sample the tooth color.")
-else:
-    st.warning("Please upload an image to begin.")
+    # Save PDF
+    now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"records/{name}_{now}.pdf"
+
+    class PDF(FPDF):
+        def header(self):
+            self.set_font("Arial", "B", 14)
+            self.cell(0, 10, "AffoDent Professional Dental Clinic", ln=1, align="C")
+            self.ln(5)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Arial", "I", 8)
+            self.cell(0, 10, f"Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", 0, 0, "C")
+
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "", 12)
+    pdf.cell(0, 10, f"Patient Name: {name}", ln=1)
+    pdf.cell(0, 10, f"Age: {age}", ln=1)
+    pdf.cell(0, 10, f"Sex: {sex}", ln=1)
+    pdf.cell(0, 10, f"Average RGB: {avg_rgb}", ln=1)
+    pdf.cell(0, 10, "Shade Matches:", ln=1)
+    for system, shade in shade_result.items():
+        pdf.cell(0, 10, f" - {system}: {shade}", ln=1)
+    if selected_manual:
+        pdf.cell(0, 10, f"Manual Shade Entry: {selected_manual}", ln=1)
+
+    # Save image temporarily
+    temp_img = "temp_img.jpg"
+    image.save(temp_img)
+    pdf.image(temp_img, x=10, y=None, w=100)
+    pdf.output(filename)
+    os.remove(temp_img)
+
+    with open(filename, "rb") as f:
+        b64_pdf = base64.b64encode(f.read()).decode()
+        href = f'<a href="data:application/octet-stream;base64,{b64_pdf}" download="{os.path.basename(filename)}">📥 Download Report PDF</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
+    # Store in memory (last 10 patients)
+    if "records" not in st.session_state:
+        st.session_state.records = []
+    st.session_state.records.insert(0, {
+        "name": name, "time": now, "file": filename
+    })
+    st.session_state.records = st.session_state.records[:10]
+
+# Show search & past reports
+st.markdown("---")
+st.subheader("📁 Previous Patient Records")
+if "records" in st.session_state:
+    search_name = st.text_input("🔍 Search by name")
+    for record in st.session_state.records:
+        if search_name.lower() in record["name"].lower():
+            st.markdown(f"**{record['name']}** ({record['time']})")
+            with open(record["file"], "rb") as f:
+                b64_pdf = base64.b64encode(f.read()).decode()
+                href = f'<a href="data:application/octet-stream;base64,{b64_pdf}" download="{os.path.basename(record["file"])}">📥 Download</a>'
+                st.markdown(href, unsafe_allow_html=True)
