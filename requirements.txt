@@ -6,3 +6,6 @@ streamlit-drawable-canvas
 fpdf
 opencv-python-headless
 reportlab
+streamlit==1.30.0
+streamlit-drawable-canvas==0.9.3
+
