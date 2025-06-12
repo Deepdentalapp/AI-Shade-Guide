@@ -4,3 +4,5 @@ numpy
 Pillow
 streamlit-drawable-canvas
 fpdf
+opencv-python-headless
+reportlab
