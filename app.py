@@ -85,3 +85,72 @@ def generate_pdf(name, sex, age, results, image_path, manual_override=None):
     return pdf_path
 
 #
+# ----------------------------- Main UI -----------------------------
+
+# Collect patient info
+with st.form("patient_info_form"):
+    name = st.text_input("Patient Name", "")
+    sex = st.selectbox("Sex", ["Male", "Female", "Other"])
+    age = st.number_input("Age", min_value=1, max_value=120, step=1)
+    uploaded_file = st.file_uploader("Upload a clear tooth photo", type=["jpg", "jpeg", "png"])
+    submit = st.form_submit_button("Submit")
+
+if submit and uploaded_file:
+    try:
+        image = Image.open(uploaded_file).convert("RGB")
+        image_np = np.array(image)
+
+        st.image(image, caption="Uploaded Image", use_column_width=True)
+
+        # Canvas to draw ROI
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 0, 0, 0.3)",
+            stroke_width=2,
+            stroke_color="red",
+            background_image=image,
+            update_streamlit=True,
+            height=image.height,
+            width=image.width,
+            drawing_mode="rect",
+            key="canvas",
+        )
+
+        if canvas_result.json_data and canvas_result.json_data["objects"]:
+            # Take the first drawn rectangle
+            obj = canvas_result.json_data["objects"][0]
+            left = int(obj["left"])
+            top = int(obj["top"])
+            width = int(obj["width"])
+            height = int(obj["height"])
+
+            roi = image_np[top:top+height, left:left+width]
+            avg_color = np.mean(roi.reshape(-1, 3), axis=0).astype(int)
+
+            st.markdown(f"**Detected Average Color (RGB)**: {tuple(avg_color)}")
+
+            results = {}
+            for system_name, system_dict in shade_systems.items():
+                closest_shade = find_closest_shade(avg_color, system_dict)
+                results[system_name] = closest_shade
+
+            st.markdown("### 📝 Shade Suggestions")
+            for k, v in results.items():
+                st.write(f"**{k}**: {v}")
+
+            # Manual override option
+            manual_override = st.text_input("Manual override shade (optional)")
+
+            # Save the uploaded image
+            img_path = os.path.join(DATA_DIR, f"{name.replace(' ', '_')}_image.png")
+            image.save(img_path)
+
+            # Generate and offer PDF report
+            pdf_path = generate_pdf(name, sex, age, results, img_path, manual_override)
+            with open(pdf_path, "rb") as f:
+                st.download_button("📄 Download Shade Report PDF", f, file_name=os.path.basename(pdf_path))
+
+        else:
+            st.warning("Please draw a rectangle over the tooth.")
+
+    except Exception as e:
+        st.error(f"Something went wrong: {e}")
